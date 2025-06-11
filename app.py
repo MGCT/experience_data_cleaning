@@ -183,7 +183,7 @@ def main():
                     st.write(f"- Columns: {len(df.columns)}")
 
                     # Check for required columns
-                    required_cols = ["brand", "touchpoint", "story_feelings"]
+                    required_cols = ["brand", "touchpoint", "text"]
                     missing_cols = [
                         col for col in required_cols if col not in df.columns
                     ]
@@ -463,7 +463,7 @@ def main():
                 default=[
                     "brand",
                     "touchpoint",
-                    "story_feelings",
+                    "text",
                     "overall_score",
                     "recommendation",
                     "issues",
