@@ -336,7 +336,7 @@ class MarketResearchDataCleaner:
         """Use Claude to analyze a single row for quality issues."""
         brand = row.get("brand", "")
         touchpoint = row.get("touchpoint", "")
-        story = row.get("story_feelings", "")
+        story = row.get("text", "")
 
         # Handle NaN/float values
         if pd.isna(brand) or brand is None:
@@ -478,7 +478,7 @@ Respond ONLY with valid JSON:
     def score_row(self, row: pd.Series, use_claude: bool = True) -> Dict:
         """Score a single row combining all checks."""
         # Handle potential float/NaN values
-        story = row.get("story_feelings", "")
+        story = row.get("text", "")
         if pd.isna(story) or story is None:
             story = ""
         else:
@@ -639,7 +639,7 @@ Respond ONLY with valid JSON:
                 if debug and "Claude response parsing error" in scores.get(
                     "issues", []
                 ):
-                    story_val = row.get("story_feelings", "")
+                    story_val = row.get("text", "")
                     if pd.isna(story_val) or story_val is None:
                         story_preview = ""
                     else:
@@ -664,7 +664,7 @@ Respond ONLY with valid JSON:
             except Exception as e:
                 print(f"ERROR processing row {idx}: {e}")
                 # Add a default score for failed rows
-                story_val = row.get("story_feelings", "")
+                story_val = row.get("text", "")
                 if pd.isna(story_val) or story_val is None:
                     story_preview = ""
                 else:
@@ -798,7 +798,7 @@ if __name__ == "__main__":
             {
                 "brand": ["Nike", "Adidas", "Puma", "Reebok"],
                 "touchpoint": ["In a shop", "TV", "Online", "Social media"],
-                "story_feelings": [
+                "text": [
                     "Saw the new Nike shoes in the store display",  # Good match
                     "Watching TV and saw a Puma commercial",  # Wrong brand
                     "Browsing Instagram when I saw an ad",  # No brand mentioned
