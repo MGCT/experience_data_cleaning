@@ -12,11 +12,24 @@ st.set_page_config(
 )
 
 # Custom CSS for better styling
+# Custom CSS for better styling
 st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
     @import url('https://fonts.googleapis.com/icon?family=Material+Icons');
+    
+    /* Hide any Material Icons fallback text and replace with Unicode */
+    *:contains('keyboard_double_arrow_right') {
+        visibility: hidden;
+        position: relative;
+    }
+    *:contains('keyboard_double_arrow_right')::after {
+        content: '»';
+        visibility: visible;
+        position: absolute;
+        left: 0;
+    }
     
     html, body, [data-testid="stAppViewContainer"] {
         background-color: #F7F4EB !important;
