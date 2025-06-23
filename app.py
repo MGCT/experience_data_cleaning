@@ -12,28 +12,46 @@ st.set_page_config(
 )
 
 # Custom CSS for better styling
-# Custom CSS for better styling
 st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
     @import url('https://fonts.googleapis.com/icon?family=Material+Icons');
     
-    /* Hide any Material Icons fallback text and replace with Unicode */
-    *:contains('keyboard_double_arrow_right') {
-        visibility: hidden;
-        position: relative;
-    }
-    *:contains('keyboard_double_arrow_right')::after {
-        content: '»';
-        visibility: visible;
-        position: absolute;
-        left: 0;
-    }
-    
     html, body, [data-testid="stAppViewContainer"] {
         background-color: #F7F4EB !important;
         font-family: 'Montserrat', sans-serif !important;
+    }
+    
+    /* Fix for sidebar toggle button showing text instead of icon */
+    button[kind="header"] {
+        overflow: hidden;
+    }
+    
+    button[kind="header"] span {
+        visibility: hidden;
+        position: relative;
+    }
+    
+    button[kind="header"] span:before {
+        content: "»";
+        visibility: visible;
+        position: absolute;
+        left: 0;
+        top: 0;
+        font-size: 24px;
+        font-weight: bold;
+    }
+    
+    /* Alternative: Hide the problematic text completely */
+    .stApp [data-testid="stSidebarNav"] button div {
+        font-size: 0;
+    }
+    
+    .stApp [data-testid="stSidebarNav"] button div:after {
+        content: "»";
+        font-size: 1.5rem;
+        display: inline-block;
     }
     [data-testid="stSidebar"] {
         background-color: #00F5D4 !important;
