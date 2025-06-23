@@ -150,6 +150,18 @@ class MarketResearchDataCleaner:
                 "page",
             ],
             "cinema": ["cinema", "movie", "film", "screen", "theater"],
+            "payment": [
+                "payment",
+                "pay",
+                "paid",
+                "purchase",
+                "bought",
+                "transaction",
+                "transfer",
+                "transferred",
+                "paid for",
+                "paid out",
+            ],
             "sponsorship": ["sponsor", "sponsored", "partnership", "event"],
             "me drinking/purchasing": [
                 "bought",
