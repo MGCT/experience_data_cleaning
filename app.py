@@ -32,6 +32,18 @@ st.markdown(
     [data-testid="stAlert"] * {
         color: #111 !important;                /* Ensure all text inside is black */
     }
+    .material-icons, [class*="material-icons"] {
+        font-family: 'Material Icons' !important;
+        font-style: normal !important;
+        font-weight: normal !important;
+        font-variant: normal !important;
+        text-transform: none !important;
+        line-height: 1 !important;
+        letter-spacing: normal !important;
+        direction: ltr !important;
+        -webkit-font-feature-settings: 'liga';
+        -webkit-font-smoothing: antialiased;
+    }
     </style>
     """,
     unsafe_allow_html=True,
