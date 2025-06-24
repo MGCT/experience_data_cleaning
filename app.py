@@ -8,10 +8,14 @@ from main import MarketResearchDataCleaner
 
 # Page configuration
 st.set_page_config(
-    page_title="MESH Experience Data Cleaner", page_icon="🧹", layout="wide"
+    page_title="MESH Experience Data Cleaner",
+    page_icon="🧹",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 # Custom CSS for better styling
+
 st.markdown(
     """
     <style>
@@ -23,48 +27,127 @@ st.markdown(
         font-family: 'Montserrat', sans-serif !important;
     }
     
-    /* Fix for sidebar toggle button showing text instead of icon */
+    /* SIDEBAR LOCK - Comprehensive solution */
+    /* Hide all collapse/expand controls */
+    [data-testid="collapsedControl"] {
+        display: none !important;
+    }
+    
+    /* Hide the hamburger menu button */
     button[kind="header"] {
-        overflow: hidden;
+        display: none !important;
     }
     
-    button[kind="header"] span {
-        visibility: hidden;
-        position: relative;
+    /* Hide any sidebar nav button */
+    .css-1cypcdb, .css-1avcm0n, .css-nziaof {
+        display: none !important;
     }
     
-    button[kind="header"] span:before {
-        content: "»";
-        visibility: visible;
-        position: absolute;
-        left: 0;
-        top: 0;
-        font-size: 24px;
-        font-weight: bold;
+    /* Ensure sidebar is always expanded */
+    section[data-testid="stSidebar"] {
+        width: 21rem !important;
+        min-width: 21rem !important;
+        max-width: 21rem !important;
+        transform: none !important;
+        position: relative !important;
+        z-index: 999 !important;
+        margin-left: 0 !important;
     }
     
-    /* Alternative: Hide the problematic text completely */
-    .stApp [data-testid="stSidebarNav"] button div {
-        font-size: 0;
+    /* Force sidebar to be visible */
+    section[data-testid="stSidebar"] > div:first-child {
+        width: 21rem !important;
+        position: relative !important;
+        left: 0 !important;
+        background-color: #00F5D4 !important;
+        opacity: 1 !important;
+        visibility: visible !important;
     }
     
-    .stApp [data-testid="stSidebarNav"] button div:after {
-        content: "»";
-        font-size: 1.5rem;
-        display: inline-block;
+    /* Ensure main content adjusts for sidebar */
+    .main .block-container {
+        margin-left: 21rem !important;
     }
+    
+    /* Hide any remaining toggle buttons using attribute selectors */
+    [aria-label*="sidebar"], [aria-label*="navigation"] {
+        display: none !important;
+    }
+        /* Style the main header/toolbar */
+    header[data-testid="stHeader"] {
+        background-color: transparent !important;
+    }
+
+    /* Hide or style the decoration line */
+    div[data-testid="stDecoration"] {
+        display: none !important;
+    }
+
+    /* Ensure the toolbar items blend in */
+    [data-testid="stToolbar"] {
+        background-color: transparent !important;
+    }
+
+    /* Style the app header container */
+    .stApp > header {
+        background-color: transparent !important;
+        backdrop-filter: none !important;
+    }
+
+    /* Remove any shadows or borders */
+    header[data-testid="stHeader"] {
+        box-shadow: none !important;
+        border-bottom: none !important;
+    }
+    
+    /* Target the specific toggle button by multiple selectors */
+    .css-1rs6os, .css-1acszo8, .css-1outpf7 {
+        display: none !important;
+    }
+    
+    /* Hide sidebar toggle by targeting its container */
+    div[class*="collapsedControl"] {
+        display: none !important;
+    }
+    
+    /* Prevent pointer events on any remaining toggle elements */
+    button[title*="sidebar"], button[title*="navigation"] {
+        display: none !important;
+        pointer-events: none !important;
+    }
+    
+    /* Additional targeting for Streamlit 1.28+ */
+    .st-emotion-cache-1cypcdb {
+        display: none !important;
+    }
+    
+    .st-emotion-cache-1avcm0n {
+        display: none !important;
+    }
+    
+    /* Sidebar styling */
     [data-testid="stSidebar"] {
         background-color: #00F5D4 !important;
     }
+    
+    /* Font styling */
     *, .stText, .stMarkdown, .stButton>button, .stMetric, .stDataFrame, .stDownloadButton, .stHeader, .stSubheader {
         font-family: 'Montserrat', sans-serif !important;
     }
+    
+    /* Alert styling */
     [data-testid="stAlert"] {
-        color: #111 !important;                /* Black text */
+        color: #111 !important;
     }
     [data-testid="stAlert"] * {
-        color: #111 !important;                /* Ensure all text inside is black */
+        color: #111 !important;
     }
+    
+    [data-testid="stSidebar"] button:first-of-type {
+    display: none !important;
+    }
+           
+    /* Material Icons */
     .material-icons, [class*="material-icons"] {
         font-family: 'Material Icons' !important;
         font-style: normal !important;
