@@ -1,3 +1,12 @@
+# =========================================
+# CHANGELOG (2024-06-09)
+# =========================================
+# - Added fuzzy matching for brand_other and touchpoint_other columns to suggest renaming to existing values.
+# - Added survey reference detection in text column.
+# - Added automatic special character normalization in text fields.
+# - Added duplicate experience detection (id, brand, touchpoint, text).
+# - All new checks output as columns in the results CSV and report.
+# =========================================
 import pandas as pd
 import anthropic
 import re
@@ -6,6 +15,10 @@ from typing import Dict, List, Tuple
 import json
 from datetime import datetime
 import os
+
+# New imports for fuzzy matching and unicode normalization
+from rapidfuzz import fuzz, process
+import unicodedata
 
 
 class MarketResearchDataCleaner:
@@ -487,8 +500,15 @@ Respond ONLY with valid JSON:
                 "summary": f"Error: {str(e)}",
             }
 
-    def score_row(self, row: pd.Series, use_claude: bool = True) -> Dict:
-        """Score a single row combining all checks."""
+    def score_row(
+        self,
+        row: pd.Series,
+        use_claude: bool = True,
+        brand_list=None,
+        touchpoint_list=None,
+        duplicate_flags=None,
+    ) -> Dict:
+        """Score a single row combining all checks, including new flags."""
         # Handle potential float/NaN values
         story = row.get("text", "")
         if pd.isna(story) or story is None:
@@ -508,6 +528,33 @@ Respond ONLY with valid JSON:
         else:
             touchpoint = str(touchpoint)
 
+        # --- New checks ---
+        # Brand_other similarity
+        brand_other_flag = False
+        brand_other_suggestion = None
+        if "brand_other" in row and row["brand_other"] and brand_list:
+            brand_other_flag, brand_other_suggestion = (
+                self.check_brand_other_similarity(row["brand_other"], brand_list)
+            )
+
+        # Touchpoint_other similarity
+        touchpoint_other_flag = False
+        touchpoint_other_suggestion = None
+        if "touchpoint_other" in row and row["touchpoint_other"] and touchpoint_list:
+            touchpoint_other_flag, touchpoint_other_suggestion = (
+                self.check_touchpoint_other_similarity(
+                    row["touchpoint_other"], touchpoint_list
+                )
+            )
+
+        # Survey reference in text
+        survey_reference_flag = self.check_survey_reference(story)
+
+        # Duplicate experience
+        duplicate_flag = False
+        if duplicate_flags is not None and row.name in duplicate_flags.index:
+            duplicate_flag = bool(duplicate_flags.loc[row.name])
+
         scores = {
             "row_index": row.name,
             "brand": brand,
@@ -523,6 +570,13 @@ Respond ONLY with valid JSON:
             "quality_score": 50,
             "issues": [],
             "summary": "Not analyzed",
+            # New columns
+            "brand_other_flag": brand_other_flag,
+            "brand_other_suggestion": brand_other_suggestion,
+            "touchpoint_other_flag": touchpoint_other_flag,
+            "touchpoint_other_suggestion": touchpoint_other_suggestion,
+            "survey_reference_flag": survey_reference_flag,
+            "duplicate_flag": duplicate_flag,
         }
 
         # Basic checks
@@ -571,28 +625,59 @@ Respond ONLY with valid JSON:
         if touchpoint_score == -100:
             scores["issues"].append("CRITICAL: Different touchpoint described")
 
+        # --- New issues and penalties ---
+        if brand_other_flag:
+            penalty += 20
+            scores["issues"].append(
+                f"Brand in 'brand_other' is similar to an existing brand: suggest recoding to '{brand_other_suggestion}'"
+            )
+        if touchpoint_other_flag:
+            penalty += 20
+            scores["issues"].append(
+                f"Touchpoint in 'touchpoint_other' is similar to an existing touchpoint: suggest recoding to '{touchpoint_other_suggestion}'"
+            )
+        if survey_reference_flag:
+            penalty += 15
+            scores["issues"].append("Mentions survey in response")
+        if duplicate_flag:
+            penalty += 50
+            scores["issues"].append(
+                "Duplicate experience (same brand, touchpoint, text, date)"
+            )
+
         # Overall score calculation
-        # For mismatches (negative scores), we want to heavily penalize
-        if brand_score < 0 or touchpoint_score < 0:
-            # If there's a mismatch, start with a very low base score
+        if brand_score < 0 or touchpoint_score < 0 or duplicate_flag:
             base_score = 0
         else:
-            # Normal calculation for non-negative scores
             base_score = (
                 brand_score + touchpoint_score + scores.get("quality_score", 50)
             ) / 3
 
         scores["overall_score"] = max(0, base_score - penalty)
 
-        # Recommendation based on new scoring
-        if brand_score < 0 or touchpoint_score < 0:
-            scores["recommendation"] = "Remove - brand/touchpoint mismatch"
+        # Recommendation logic (most severe wins)
+        recommendation = None
+        if duplicate_flag:
+            recommendation = "Remove - duplicate experience"
+        elif brand_score < 0 or touchpoint_score < 0:
+            recommendation = "Remove - brand/touchpoint mismatch"
         elif scores["overall_score"] < 30:
-            scores["recommendation"] = "Remove - poor quality"
+            recommendation = "Remove - poor quality"
+        elif brand_other_flag or touchpoint_other_flag:
+            recommendation = "Review - recode brand/touchpoint"
+        elif survey_reference_flag:
+            recommendation = "Review - survey reference"
         elif scores["overall_score"] < 60:
-            scores["recommendation"] = "Review - potential issues"
+            recommendation = "Review - potential issues"
         else:
-            scores["recommendation"] = "Keep - appears valid"
+            recommendation = "Keep - appears valid"
+        scores["recommendation"] = recommendation
+
+        # Summary
+        if scores["issues"]:
+            scores["summary"] = "; ".join(scores["issues"])
+        else:
+            scores["summary"] = "No major issues detected"
 
         return scores
 
@@ -629,12 +714,30 @@ Respond ONLY with valid JSON:
                 variations = self.generate_brand_variations(brand)
                 self.brand_variations[brand] = variations
 
+        # Normalize text and other relevant columns before analysis
+        for col in ["text", "brand_other", "touchpoint_other"]:
+            if col in df.columns:
+                df[col] = df[col].apply(self.normalize_text)
+
         # Sample if requested (for testing)
         if sample_size and sample_size < len(df):
             df_sample = df.sample(n=sample_size, random_state=42)
             print(f"Using sample of {sample_size} rows")
         else:
             df_sample = df
+
+        # Prepare lists for fuzzy matching
+        brand_list = (
+            df["brand"].dropna().unique().tolist() if "brand" in df.columns else []
+        )
+        touchpoint_list = (
+            df["touchpoint"].dropna().unique().tolist()
+            if "touchpoint" in df.columns
+            else []
+        )
+
+        # Precompute duplicate flags for all rows
+        duplicate_flags = self.find_duplicate_experiences(df)
 
         results = []
         error_rows = []
@@ -644,7 +747,14 @@ Respond ONLY with valid JSON:
                 print(f"Processing row {idx}/{len(df_sample)}...")
 
             try:
-                scores = self.score_row(row, use_claude=use_claude)
+                scores = self.score_row(
+                    row,
+                    use_claude=use_claude,
+                    brand_list=brand_list,
+                    touchpoint_list=touchpoint_list,
+                    duplicate_flags=duplicate_flags,
+                )
+
                 results.append(scores)
 
                 # Debug mode: print details for problematic rows
@@ -767,6 +877,10 @@ Other Issues Found:
 - Gibberish: {scored_df["is_gibberish"].sum()} rows
 - No Experience: {scored_df["is_no_experience"].sum()} rows
 - Very Short (<20 chars): {len(scored_df[scored_df["story_length"] < 20])} rows
+- Brand_other similar to brand: {scored_df.get("brand_other_flag", pd.Series([False] * len(scored_df))).sum()} rows
+- Touchpoint_other similar to touchpoint: {scored_df.get("touchpoint_other_flag", pd.Series([False] * len(scored_df))).sum()} rows
+- Survey references: {scored_df.get("survey_reference_flag", pd.Series([False] * len(scored_df))).sum()} rows
+- Duplicates: {scored_df.get("duplicate_flag", pd.Series([False] * len(scored_df))).sum()} rows
 
 Recommendations:
 - Remove: {len(scored_df[scored_df["recommendation"].str.contains("Remove")])} rows
@@ -780,6 +894,109 @@ Average Scores:
 - Overall Score: {scored_df["overall_score"].mean():.1f}/100
 """
         return report
+
+    def normalize_text(self, text: str) -> str:
+        """Normalize special characters in text (unicode to ASCII, replace smart quotes, dashes, etc.)."""
+        if pd.isna(text) or text is None:
+            return ""
+        text = str(text)
+        # Replace smart quotes and dashes
+        replacements = {
+            "\u2018": "'",
+            "\u2019": "'",
+            "\u201c": '"',
+            "\u201d": '"',
+            "\u2013": "-",
+            "\u2014": "-",
+            "\u2012": "-",
+            "\u2011": "-",
+            "\u00a0": " ",
+            "\u200b": "",
+            "\u2026": "...",
+        }
+        for orig, repl in replacements.items():
+            text = text.replace(orig, repl)
+        # Normalize unicode to closest ASCII
+        text = (
+            unicodedata.normalize("NFKD", text)
+            .encode("ascii", "ignore")
+            .decode("ascii")
+        )
+        # Remove extra spaces
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    def check_brand_other_similarity(
+        self, brand_other: str, brand_list: list, threshold: int = 85
+    ) -> tuple:
+        """Check if brand_other is similar to any brand in brand_list using fuzzy matching."""
+        if not brand_other or not brand_list:
+            return False, None
+        # Use rapidfuzz to find best match
+        match, score, _ = process.extractOne(brand_other, brand_list, scorer=fuzz.ratio)
+        if score >= threshold:
+            return True, match
+        return False, None
+
+    def check_touchpoint_other_similarity(
+        self, touchpoint_other: str, touchpoint_list: list, threshold: int = 85
+    ) -> tuple:
+        """Check if touchpoint_other is similar to any touchpoint in touchpoint_list using fuzzy matching."""
+        if not touchpoint_other or not touchpoint_list:
+            return False, None
+        match, score, _ = process.extractOne(
+            touchpoint_other, touchpoint_list, scorer=fuzz.ratio
+        )
+        if score >= threshold:
+            return True, match
+        return False, None
+
+    def check_survey_reference(self, text: str) -> bool:
+        """Detect if the text references the survey itself (e.g., 'because of this survey')."""
+        if pd.isna(text) or not text:
+            return False
+        survey_phrases = [
+            "because of this survey",
+            "doing this survey",
+            "as part of this survey",
+            "only noticed because",
+            "only noticed due to",
+            "since i am doing this",
+            "since i was doing this",
+            "since i took this survey",
+            "since i am taking this survey",
+            "since i was taking this survey",
+            "because i am doing this",
+            "because i was doing this",
+            "because i am taking this survey",
+            "because i was taking this survey",
+            "because of the survey",
+            "as part of the survey",
+            "for this survey",
+            "for the survey",
+            "due to this survey",
+            "due to the survey",
+        ]
+        text_lower = text.lower()
+        return any(phrase in text_lower for phrase in survey_phrases)
+
+    def find_duplicate_experiences(self, df: pd.DataFrame) -> pd.Series:
+        """Return a boolean Series indicating duplicate experiences (brand, touchpoint, text, date)."""
+        # Try to find a date column
+        date_cols = [
+            col
+            for col in ["date", "Date", "datetime", "timestamp", "created_at"]
+            if col in df.columns
+        ]
+        if date_cols:
+            date_col = date_cols[0]
+            required_cols = ["brand", "touchpoint", "text", date_col]
+        else:
+            required_cols = ["brand", "touchpoint", "text"]
+        if not all(col in df.columns for col in required_cols):
+            return pd.Series([False] * len(df), index=df.index)
+        # Mark duplicates (keep first occurrence as not duplicate)
+        return df.duplicated(subset=required_cols, keep="first")
 
 
 # Example usage
