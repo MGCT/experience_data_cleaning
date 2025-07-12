@@ -256,6 +256,29 @@ def main():
             help="Process a sample of rows for testing. Set to 0 to process all rows.",
         )
 
+        # API timeout settings (only show if using Claude)
+        if use_claude:
+            st.subheader("API Settings")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                request_timeout = st.number_input(
+                    "API Timeout (seconds)",
+                    min_value=10,
+                    max_value=120,
+                    value=30,
+                    help="Timeout for each API request. Increase for slower connections.",
+                )
+
+            with col2:
+                max_retries = st.number_input(
+                    "Max Retries",
+                    min_value=1,
+                    max_value=10,
+                    value=3,
+                    help="Maximum number of retries for failed API requests.",
+                )
+
         st.markdown("---")
 
         # Info box
@@ -371,6 +394,12 @@ def main():
                                             and bool(st.session_state.api_key),
                                             sample_size=actual_sample_size,
                                             debug=False,
+                                            request_timeout=request_timeout
+                                            if use_claude
+                                            else 30.0,
+                                            max_retries=max_retries
+                                            if use_claude
+                                            else 3,
                                         )
 
                                         progress_bar.progress(80)

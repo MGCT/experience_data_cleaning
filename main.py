@@ -6,6 +6,9 @@
 # - Added automatic special character normalization in text fields.
 # - Added duplicate experience detection (id, brand, touchpoint, text).
 # - All new checks output as columns in the results CSV and report.
+# - IMPROVED: Added proper API timeout handling and retry logic for large datasets.
+# - IMPROVED: Reduced unnecessary rate limiting delays.
+# - IMPROVED: Better progress tracking for large datasets.
 # =========================================
 import pandas as pd
 import anthropic
@@ -15,6 +18,9 @@ from typing import Dict, List, Tuple
 import json
 from datetime import datetime
 import os
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # New imports for fuzzy matching and unicode normalization
 from rapidfuzz import fuzz, process
@@ -33,7 +39,25 @@ class MarketResearchDataCleaner:
             brand_list: Optional list of brands to check for
             brand_file: Optional path to file containing brand list (one per line)
         """
-        self.client = anthropic.Anthropic(api_key=api_key)
+        # Configure retry strategy for API calls
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+
+        # Create session with timeout and retry configuration
+        session = requests.Session()
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+
+        # Initialize Anthropic client with timeout and session
+        self.client = anthropic.Anthropic(
+            api_key=api_key,
+            timeout=30.0,  # 30 second timeout per request
+            http_client=session,
+        )
 
         # Profanity list (expandable)
         self.profanity_patterns = [
@@ -490,6 +514,24 @@ Respond ONLY with valid JSON:
                 "issues": ["Claude response parsing error"],
                 "summary": "Could not parse Claude response",
             }
+        except requests.exceptions.Timeout:
+            print(f"API timeout for row {row.name}")
+            return {
+                "brand_match_score": 50,
+                "touchpoint_match_score": 50,
+                "quality_score": 50,
+                "issues": ["API timeout"],
+                "summary": "API request timed out",
+            }
+        except requests.exceptions.RequestException as e:
+            print(f"API request error for row {row.name}: {e}")
+            return {
+                "brand_match_score": 50,
+                "touchpoint_match_score": 50,
+                "quality_score": 50,
+                "issues": ["API request error"],
+                "summary": f"API error: {str(e)}",
+            }
         except Exception as e:
             print(f"Error analyzing row {row.name}: {e}")
             return {
@@ -681,6 +723,32 @@ Respond ONLY with valid JSON:
 
         return scores
 
+    def configure_timeouts(self, request_timeout: float = 30.0, max_retries: int = 3):
+        """
+        Configure timeout and retry settings for API calls.
+
+        Args:
+            request_timeout: Timeout in seconds for each API request
+            max_retries: Maximum number of retries for failed requests
+        """
+        # Configure retry strategy for API calls
+        retry_strategy = Retry(
+            total=max_retries,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+
+        # Create session with timeout and retry configuration
+        session = requests.Session()
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+
+        # Update Anthropic client with new timeout and session
+        self.client = anthropic.Anthropic(
+            api_key=self.client.api_key, timeout=request_timeout, http_client=session
+        )
+
     def process_dataset(
         self,
         df: pd.DataFrame,
@@ -688,6 +756,8 @@ Respond ONLY with valid JSON:
         sample_size: int = None,
         debug: bool = False,
         auto_extract_brands: bool = True,
+        request_timeout: float = 30.0,
+        max_retries: int = 3,
     ) -> pd.DataFrame:
         """
         Process entire dataset and return scored results.
@@ -698,8 +768,17 @@ Respond ONLY with valid JSON:
             sample_size: Number of rows to process (None = all)
             debug: Show debug information
             auto_extract_brands: Automatically extract brands from dataset
+            request_timeout: Timeout in seconds for API requests
+            max_retries: Maximum number of retries for failed requests
         """
         print(f"Processing {len(df)} rows...")
+
+        # Configure timeouts if using Claude
+        if use_claude:
+            self.configure_timeouts(request_timeout, max_retries)
+            print(
+                f"API timeout configured: {request_timeout}s, max retries: {max_retries}"
+            )
 
         # Auto-extract brands from dataset if enabled and no brands loaded
         if auto_extract_brands and not self.common_brands:
@@ -715,6 +794,7 @@ Respond ONLY with valid JSON:
                 self.brand_variations[brand] = variations
 
         # Normalize text and other relevant columns before analysis
+        print("📝 Normalizing text data...")
         for col in ["text", "brand_other", "touchpoint_other"]:
             if col in df.columns:
                 df[col] = df[col].apply(self.normalize_text)
@@ -737,14 +817,37 @@ Respond ONLY with valid JSON:
         )
 
         # Precompute duplicate flags for all rows
+        print("🔍 Checking for duplicate experiences...")
         duplicate_flags = self.find_duplicate_experiences(df)
 
         results = []
         error_rows = []
+        api_errors = 0
+        total_api_calls = 0
+
+        # Calculate progress reporting frequency based on dataset size
+        progress_frequency = max(
+            1, min(50, len(df_sample) // 20)
+        )  # Report every 5% or at least every 50 rows
+
+        print(f"🚀 Starting analysis of {len(df_sample)} rows...")
+        start_time = time.time()
 
         for idx, row in df_sample.iterrows():
-            if idx % 10 == 0:
-                print(f"Processing row {idx}/{len(df_sample)}...")
+            # Better progress reporting
+            if idx % progress_frequency == 0:
+                progress_pct = (idx / len(df_sample)) * 100
+                elapsed_time = time.time() - start_time
+                if idx > 0:
+                    estimated_total = (elapsed_time / idx) * len(df_sample)
+                    remaining_time = estimated_total - elapsed_time
+                    print(
+                        f"Processing row {idx}/{len(df_sample)} ({progress_pct:.1f}%) - ETA: {remaining_time / 60:.1f} minutes..."
+                    )
+                else:
+                    print(
+                        f"Processing row {idx}/{len(df_sample)} ({progress_pct:.1f}%)..."
+                    )
 
             try:
                 scores = self.score_row(
@@ -756,6 +859,10 @@ Respond ONLY with valid JSON:
                 )
 
                 results.append(scores)
+
+                # Track API usage
+                if use_claude and scores.get("summary") != "Basic analysis only":
+                    total_api_calls += 1
 
                 # Debug mode: print details for problematic rows
                 if debug and "Claude response parsing error" in scores.get(
@@ -785,6 +892,7 @@ Respond ONLY with valid JSON:
 
             except Exception as e:
                 print(f"ERROR processing row {idx}: {e}")
+                api_errors += 1
                 # Add a default score for failed rows
                 story_val = row.get("text", "")
                 if pd.isna(story_val) or story_val is None:
@@ -819,9 +927,14 @@ Respond ONLY with valid JSON:
                     }
                 )
 
-            # Rate limiting for Claude API
-            if use_claude:
-                time.sleep(0.5)  # Adjust based on your API limits
+        # Print final statistics
+        total_time = time.time() - start_time
+        print(f"\n✅ Processing complete!")
+        print(f"   Total time: {total_time / 60:.1f} minutes")
+        print(f"   API calls: {total_api_calls}")
+        print(f"   API errors: {api_errors}")
+        if total_api_calls > 0:
+            print(f"   Average time per API call: {total_time / total_api_calls:.2f}s")
 
         if debug and error_rows:
             print(f"\n=== ROWS WITH PARSING ERRORS ({len(error_rows)}) ===")
@@ -1076,6 +1189,8 @@ if __name__ == "__main__":
         sample_size=30,  # Remove or set to None to process all rows
         debug=True,  # Set to True to see error details
         auto_extract_brands=True,  # Auto-extract brands from data
+        request_timeout=100.0,  # API timeout in seconds
+        max_retries=3,  # Maximum retries for failed requests
     )
 
     # Merge scores with original data
