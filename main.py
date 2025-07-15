@@ -26,6 +26,9 @@ from urllib3.util.retry import Retry
 from rapidfuzz import fuzz, process
 import unicodedata
 
+# Add httpx import for Anthropic client
+import httpx
+
 
 class MarketResearchDataCleaner:
     def __init__(
@@ -39,24 +42,15 @@ class MarketResearchDataCleaner:
             brand_list: Optional list of brands to check for
             brand_file: Optional path to file containing brand list (one per line)
         """
-        # Configure retry strategy for API calls
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
+        # Configure httpx client for Anthropic API
+        limits = httpx.Limits(max_connections=10, max_keepalive_connections=5)
+        transport = httpx.HTTPTransport(retries=3)
+        httpx_client = httpx.Client(timeout=30.0, limits=limits, transport=transport)
 
-        # Create session with timeout and retry configuration
-        session = requests.Session()
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-
-        # Initialize Anthropic client with timeout and session
+        # Initialize Anthropic client with httpx client
         self.client = anthropic.Anthropic(
             api_key=api_key,
-            timeout=30.0,  # 30 second timeout per request
-            http_client=session,
+            http_client=httpx_client,
         )
 
         # Profanity list (expandable)
@@ -731,22 +725,16 @@ Respond ONLY with valid JSON:
             request_timeout: Timeout in seconds for each API request
             max_retries: Maximum number of retries for failed requests
         """
-        # Configure retry strategy for API calls
-        retry_strategy = Retry(
-            total=max_retries,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
+        # Configure httpx client for Anthropic API
+        limits = httpx.Limits(max_connections=10, max_keepalive_connections=5)
+        transport = httpx.HTTPTransport(retries=max_retries)
+        httpx_client = httpx.Client(
+            timeout=request_timeout, limits=limits, transport=transport
         )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
 
-        # Create session with timeout and retry configuration
-        session = requests.Session()
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-
-        # Update Anthropic client with new timeout and session
+        # Update Anthropic client with new timeout and httpx client
         self.client = anthropic.Anthropic(
-            api_key=self.client.api_key, timeout=request_timeout, http_client=session
+            api_key=self.client.api_key, timeout=None, http_client=httpx_client
         )
 
     def process_dataset(
